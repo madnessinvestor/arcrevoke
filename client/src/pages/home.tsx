@@ -1,12 +1,122 @@
 import { ConnectWallet } from "@/components/ConnectWallet";
 import { ApprovalList } from "@/components/ApprovalList";
-import { ShieldCheck, Search, Activity, Lock } from "lucide-react";
+import { ShieldCheck, Search, Activity, Lock, FileCheck } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import generatedImage from '@assets/generated_images/futuristic_abstract_dark_crypto_background_with_neon_networks.png';
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { JsonRpcProvider, Contract, formatUnits } from "ethers";
+import { ARC_TESTNET } from "@/lib/arc-network";
+
+interface ContractSearchResult {
+  address: string;
+  name?: string;
+  symbol?: string;
+  decimals?: number;
+  totalSupply?: string;
+  isToken: boolean;
+}
+
+const ERC20_ABI = [
+  "function name() view returns (string)",
+  "function symbol() view returns (string)",
+  "function decimals() view returns (uint8)",
+  "function totalSupply() view returns (uint256)"
+];
 
 export default function Home() {
   const [account, setAccount] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchResult, setSearchResult] = useState<ContractSearchResult | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [statsRefreshKey, setStatsRefreshKey] = useState(0);
+
+  // Fetch stats from the server
+  const { data: stats, refetch: refetchStats } = useQuery<{ totalRevokes: number; totalValueSecured: string }>({
+    queryKey: ['/api/stats', statsRefreshKey],
+    refetchInterval: 10000, // Refresh every 10 seconds
+  });
+
+  const handleStatsUpdate = useCallback(() => {
+    setStatsRefreshKey(prev => prev + 1);
+    refetchStats();
+  }, [refetchStats]);
+
+  const formatCurrency = (value: string | undefined) => {
+    if (!value) return "$0.00";
+    const num = parseFloat(value);
+    if (num < 1000) return `$${num.toFixed(2)}`;
+    if (num < 1000000) return `$${(num / 1000).toFixed(2)}K`;
+    return `$${(num / 1000000).toFixed(2)}M`;
+  };
+
+  const searchContract = async () => {
+    if (!searchQuery.trim()) return;
+    
+    setIsSearching(true);
+    setSearchError(null);
+    setSearchResult(null);
+
+    try {
+      const provider = new JsonRpcProvider(ARC_TESTNET.rpcUrls[0]);
+      const address = searchQuery.trim();
+
+      // Validate address format
+      if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+        setSearchError("Invalid address format. Please enter a valid contract address.");
+        setIsSearching(false);
+        return;
+      }
+
+      // Check if it's a contract
+      const code = await provider.getCode(address);
+      if (code === "0x") {
+        setSearchError("No contract found at this address on Arc Testnet.");
+        setIsSearching(false);
+        return;
+      }
+
+      // Try to get ERC20 info
+      const contract = new Contract(address, ERC20_ABI, provider);
+      let name = "", symbol = "", decimals = 18, totalSupply = "0";
+      let isToken = false;
+
+      try {
+        [name, symbol, decimals, totalSupply] = await Promise.all([
+          contract.name().catch(() => "Unknown Contract"),
+          contract.symbol().catch(() => "???"),
+          contract.decimals().catch(() => 18),
+          contract.totalSupply().catch(() => BigInt(0))
+        ]);
+        isToken = true;
+      } catch (e) {
+        name = "Unknown Contract";
+        symbol = "???";
+      }
+
+      setSearchResult({
+        address,
+        name,
+        symbol,
+        decimals,
+        totalSupply: isToken ? formatUnits(totalSupply, decimals) : "N/A",
+        isToken
+      });
+    } catch (error) {
+      console.error("Search error:", error);
+      setSearchError("Failed to search contract. Please try again.");
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      searchContract();
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
@@ -41,51 +151,89 @@ export default function Home() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
           <div className="glass-panel p-6 rounded-xl relative overflow-hidden group">
             <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-              <Activity size={64} />
+              <FileCheck size={64} />
             </div>
-            <h3 className="text-muted-foreground text-sm font-mono mb-2">NETWORK STATUS</h3>
+            <h3 className="text-muted-foreground text-sm font-mono mb-2">REVOKED CONTRACTS</h3>
             <div className="flex items-end gap-2">
-              <span className="text-3xl font-display font-bold text-white">Online</span>
-              <div className="h-3 w-3 rounded-full bg-green-500 mb-2 animate-pulse shadow-[0_0_10px_#22c55e]" />
+              <span className="text-3xl font-display font-bold text-primary" data-testid="text-revoked-count">
+                {stats?.totalRevokes ?? 0}
+              </span>
             </div>
-            <p className="text-xs text-muted-foreground mt-2">Arc Testnet</p>
+            <p className="text-xs text-muted-foreground mt-2">Total revokes performed</p>
           </div>
 
           <div className="glass-panel p-6 rounded-xl relative overflow-hidden group">
-             <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+            <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
               <Lock size={64} />
             </div>
             <h3 className="text-muted-foreground text-sm font-mono mb-2">ASSETS SECURED</h3>
             <div className="flex items-end gap-2">
-              <span className="text-3xl font-display font-bold text-white">$1.2M+</span>
+              <span className="text-3xl font-display font-bold text-green-400" data-testid="text-assets-secured">
+                {formatCurrency(stats?.totalValueSecured)}
+              </span>
             </div>
-            <p className="text-xs text-muted-foreground mt-2">Across 5,000+ wallets</p>
+            <p className="text-xs text-muted-foreground mt-2">Value protected by revokes</p>
           </div>
 
           <div className="glass-panel p-6 rounded-xl relative overflow-hidden group flex flex-col justify-center">
-             <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+            <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
               <Search size={64} />
             </div>
-            <div className="relative w-full">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground h-4 w-4" />
-              <Input 
-                placeholder="Search contract by name or address..." 
-                className="bg-black/40 border-white/10 pl-10 focus:border-primary/50 focus:ring-primary/20 font-mono"
-                data-testid="input-search"
-              />
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                <Input 
+                  placeholder="Enter contract address (0x...)" 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  className="bg-black/40 border-white/10 pl-10 focus:border-primary/50 focus:ring-primary/20 font-mono"
+                  data-testid="input-search"
+                />
+              </div>
+              <Button 
+                onClick={searchContract} 
+                disabled={isSearching || !searchQuery.trim()}
+                className="bg-primary text-black font-bold"
+                data-testid="button-search"
+              >
+                {isSearching ? "..." : "Search"}
+              </Button>
             </div>
+            
+            {searchError && (
+              <p className="text-red-400 text-xs mt-2 font-mono">{searchError}</p>
+            )}
+            
+            {searchResult && (
+              <div className="mt-4 p-3 bg-black/40 rounded-lg border border-white/10">
+                <div className="flex items-center gap-2 mb-2">
+                  <Activity className="text-primary h-4 w-4" />
+                  <span className="text-white font-medium text-sm">{searchResult.name}</span>
+                  {searchResult.isToken && (
+                    <span className="text-primary text-xs font-mono">({searchResult.symbol})</span>
+                  )}
+                </div>
+                <p className="text-[10px] text-muted-foreground font-mono break-all">{searchResult.address}</p>
+                {searchResult.isToken && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Total Supply: {parseFloat(searchResult.totalSupply || '0').toLocaleString()} {searchResult.symbol}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
         <div className="glass-panel rounded-xl p-6 md:p-8 min-h-[500px]">
-          <ApprovalList account={account} />
+          <ApprovalList account={account} onStatsUpdate={handleStatsUpdate} />
         </div>
       </main>
 
       <footer className="relative z-10 border-t border-white/5 bg-black/80 mt-12 py-8">
         <div className="container mx-auto px-4 text-center">
           <p className="text-muted-foreground text-sm font-mono">
-            SECURED BY ARC NETWORK • TESTNET ENVIRONMENT
+            SECURED BY ARC NETWORK - TESTNET ENVIRONMENT
           </p>
         </div>
       </footer>

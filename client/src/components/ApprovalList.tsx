@@ -3,10 +3,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ShieldAlert, Loader2, RefreshCw, ShieldOff, AlertTriangle, Coins, DollarSign } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { BrowserProvider, Contract, JsonRpcProvider, formatUnits } from "ethers";
 import { switchNetwork, ARC_TESTNET } from "@/lib/arc-network";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 interface Token {
   contractAddress: string;
@@ -50,10 +51,10 @@ const TESTNET_PRICES: Record<string, number> = {
 
 const getTokenPrice = (symbol: string): number => {
   const upperSymbol = symbol.toUpperCase();
-  return TESTNET_PRICES[upperSymbol] || 0.01; // Default price for unknown tokens
+  return TESTNET_PRICES[upperSymbol] || 0.01;
 };
 
-export function ApprovalList({ account }: { account: string | null }) {
+export function ApprovalList({ account, onStatsUpdate }: { account: string | null; onStatsUpdate?: () => void }) {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [detectedApprovals, setDetectedApprovals] = useState<DetectedApproval[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -63,16 +64,7 @@ export function ApprovalList({ account }: { account: string | null }) {
   const [isBatchRevoking, setIsBatchRevoking] = useState(false);
   const { toast } = useToast();
 
-  useEffect(() => {
-    if (account) {
-      fetchTokens();
-    } else {
-      setTokens([]);
-      setDetectedApprovals([]);
-    }
-  }, [account]);
-
-  const fetchTokens = async () => {
+  const fetchTokens = useCallback(async () => {
     if (!account) return;
     setIsLoading(true);
     
@@ -83,7 +75,6 @@ export function ApprovalList({ account }: { account: string | null }) {
       const data = await response.json();
       
       if (data.result && Array.isArray(data.result)) {
-        // Fetch balances for each token
         const provider = new JsonRpcProvider(ARC_TESTNET.rpcUrls[0]);
         const tokensWithBalances = await Promise.all(
           data.result.map(async (token: Token) => {
@@ -115,7 +106,21 @@ export function ApprovalList({ account }: { account: string | null }) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [account]);
+
+  useEffect(() => {
+    if (account) {
+      fetchTokens();
+      // Set up polling for real-time updates every 30 seconds
+      const interval = setInterval(() => {
+        fetchTokens();
+      }, 30000);
+      return () => clearInterval(interval);
+    } else {
+      setTokens([]);
+      setDetectedApprovals([]);
+    }
+  }, [account, fetchTokens]);
 
   const scanForApprovals = async (tokenList: Token[]) => {
     if (!account || tokenList.length === 0) return;
@@ -151,12 +156,9 @@ export function ApprovalList({ account }: { account: string | null }) {
               try {
                 const allowance = await contract.allowance(account, spender);
                 if (allowance > BigInt(0)) {
-                  // Calculate value at risk
                   const allowanceFormatted = parseFloat(formatUnits(allowance, decimals));
                   const tokenPrice = getTokenPrice(token.symbol || '???');
                   const valueAtRisk = allowanceFormatted * tokenPrice;
-                  
-                  // Cap display at reasonable values for unlimited approvals
                   const displayValue = valueAtRisk > 1e12 ? Infinity : valueAtRisk;
                   
                   found.push({
@@ -194,6 +196,23 @@ export function ApprovalList({ account }: { account: string | null }) {
     }
   };
 
+  const recordRevokeToServer = async (approval: DetectedApproval, txHash?: string) => {
+    try {
+      await apiRequest('POST', '/api/revoke', {
+        walletAddress: account,
+        tokenAddress: approval.tokenAddress,
+        tokenSymbol: approval.tokenSymbol,
+        spenderAddress: approval.spenderAddress,
+        valueSecured: (approval.valueAtRisk && isFinite(approval.valueAtRisk) ? approval.valueAtRisk : 0).toFixed(2),
+        txHash: txHash || null
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/stats'] });
+      onStatsUpdate?.();
+    } catch (e) {
+      console.error('Failed to record revoke:', e);
+    }
+  };
+
   const handleRevokeDetected = async (approval: DetectedApproval) => {
     if (!window.ethereum || !account) {
       toast({ title: "Wallet Not Connected", variant: "destructive" });
@@ -210,7 +229,9 @@ export function ApprovalList({ account }: { account: string | null }) {
       const tx = await contract.approve(approval.spenderAddress, 0);
       
       toast({ title: "Transaction Sent", description: "Confirm in wallet" });
-      await tx.wait();
+      const receipt = await tx.wait();
+      
+      await recordRevokeToServer(approval, receipt?.hash);
       
       toast({ title: "Revoked", description: `${approval.tokenSymbol} approval revoked` });
       setDetectedApprovals(prev => prev.filter(a => a.id !== approval.id));
@@ -252,9 +273,10 @@ export function ApprovalList({ account }: { account: string | null }) {
         try {
           const contract = new Contract(approval.tokenAddress, ERC20_ABI, signer);
           const tx = await contract.approve(approval.spenderAddress, 0);
-          await tx.wait();
+          const receipt = await tx.wait();
           success++;
           revokedIds.push(approval.id);
+          await recordRevokeToServer(approval, receipt?.hash);
         } catch (err) {
           console.error('Batch revoke error:', err);
         }
