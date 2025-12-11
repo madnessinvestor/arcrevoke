@@ -1,9 +1,11 @@
 import { ConnectWallet } from "@/components/ConnectWallet";
 import { ApprovalList } from "@/components/ApprovalList";
+import { ManualRevoke } from "@/components/ManualRevoke";
 import { ShieldCheck, Search, Activity, Lock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import generatedImage from '@assets/generated_images/futuristic_abstract_dark_crypto_background_with_neon_networks.png';
 import { useState } from "react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function Home() {
   const [account, setAccount] = useState<string | null>(null);
@@ -80,10 +82,31 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Approvals List */}
-        <div className="glass-panel rounded-xl p-6 md:p-8 min-h-[500px]">
-          <ApprovalList account={account} />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Main Revoke Area */}
+          <div className="lg:col-span-2">
+             <div className="glass-panel rounded-xl p-6 md:p-8 min-h-[500px]">
+                <ApprovalList account={account} />
+             </div>
+          </div>
+
+          {/* Manual Revoke Sidebar */}
+          <div className="lg:col-span-1">
+             <div className="sticky top-8">
+               <ManualRevoke account={account} />
+               
+               <div className="mt-6 p-4 rounded border border-yellow-500/20 bg-yellow-500/5">
+                 <h4 className="text-yellow-500 font-bold flex items-center gap-2 mb-2">
+                   <Activity size={16} /> Beta Notice
+                 </h4>
+                 <p className="text-xs text-muted-foreground">
+                   Automatic scanning is currently in beta. If your contract doesn't appear in the list, use the Manual Revoke tool above with the specific contract addresses.
+                 </p>
+               </div>
+             </div>
+          </div>
         </div>
+
       </main>
 
       {/* Footer */}

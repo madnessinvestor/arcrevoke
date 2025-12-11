@@ -1,0 +1,216 @@
+Você só precisa:
+
+Criar um Repl → HTML, CSS, JS
+
+Apagar qualquer código padrão
+
+Criar 3 arquivos:
+
+index.html
+
+style.css
+
+script.js
+
+Colar cada conteúdo EXATAMENTE como enviado abaixo.
+
+✅ 📌 ARQUIVO 1 — index.html (copie tudo)
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Arc Testnet Revoke dApp</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Revoke dApp — Arc Testnet</h1>
+
+    <p class="note">
+      Certifique-se que sua MetaMask está conectada e pronta para trocar para a <b>Arc Testnet</b>.
+    </p>
+
+    <div class="card">
+      <h2>Revogar Permissionamento (ERC-20)</h2>
+
+      <label>Token (endereço ERC-20):</label>
+      <input id="tokenERC20" placeholder="0x... endereço do token">
+
+      <label>Spender (endereço que deseja revogar):</label>
+      <input id="spenderERC20" placeholder="0x... endereço do spender">
+
+      <button id="connectBtn">Conectar Wallet</button>
+      <button id="revokeERC20Btn">Revogar (approve = 0)</button>
+
+      <p id="statusERC20" class="status"></p>
+    </div>
+
+  </div>
+
+  <!-- ethers.js v6 -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
+
+✅ 📌 ARQUIVO 2 — style.css (copie tudo)
+body {
+  background:#f3f4f7;
+  font-family:Arial, sans-serif;
+  padding:20px;
+}
+
+.container {
+  max-width:650px;
+  margin:auto;
+}
+
+h1 {
+  text-align:center;
+}
+
+.card {
+  background:white;
+  padding:20px;
+  border-radius:12px;
+  margin-top:16px;
+  box-shadow:0 4px 14px rgba(0,0,0,0.08);
+}
+
+input {
+  width:100%;
+  padding:10px;
+  margin:8px 0 12px;
+  border-radius:8px;
+  border:1px solid #ccc;
+}
+
+button {
+  margin-right:10px;
+  padding:10px 14px;
+  border-radius:8px;
+  border:none;
+  background:#111827;
+  color:white;
+  cursor:pointer;
+}
+
+.note {
+  background:#fff3cd;
+  padding:10px;
+  border-radius:8px;
+  margin-bottom:16px;
+  border:1px solid #ffeeba;
+}
+
+.status {
+  margin-top:12px;
+  color:#222;
+  font-size:14px;
+}
+
+✅ 📌 ARQUIVO 3 — script.js (CONFIGURADO PARA ARC TESTNET)
+
+Copie tudo:
+
+// Arc Testnet Config
+const ARC_CHAIN_ID = "0x4CE5D2"; // 5042002 em hex
+const ARC_RPC = "https://rpc.testnet.arc.network";
+
+let provider;
+let signer;
+
+// Força rede Arc Testnet na MetaMask
+async function switchToArc() {
+  if (!window.ethereum) return alert("Instale a MetaMask!");
+
+  try {
+    // Tenta trocar para Arc Testnet
+    await window.ethereum.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: ARC_CHAIN_ID }]
+    });
+
+  } catch (err) {
+    // Se a rede não existe, adiciona
+    if (err.code === 4902) {
+      await window.ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [{
+          chainId: ARC_CHAIN_ID,
+          chainName: "Arc Testnet",
+          nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+          rpcUrls: [ARC_RPC],
+          blockExplorerUrls: ["https://testnet.arcscan.app"]
+        }]
+      });
+    }
+  }
+}
+
+// Conectar carteira
+document.getElementById("connectBtn").onclick = async () => {
+  await switchToArc();
+
+  provider = new ethers.BrowserProvider(window.ethereum);
+  await provider.send("eth_requestAccounts", []);
+  signer = await provider.getSigner();
+
+  const addr = await signer.getAddress();
+  document.getElementById("connectBtn").innerText =
+    `Conectado: ${addr.slice(0, 6)}...${addr.slice(-4)}`;
+};
+
+// REVOGAR PERMISSÃO ERC-20 (approve = 0)
+document.getElementById("revokeERC20Btn").onclick = async () => {
+  const token = document.getElementById("tokenERC20").value.trim();
+  const spender = document.getElementById("spenderERC20").value.trim();
+  const status = document.getElementById("statusERC20");
+
+  if (!token || !spender) {
+    return alert("Preencha token e spender!");
+  }
+
+  try {
+    if (!signer) await switchToArc();
+
+    status.innerText = "Preparando transação...";
+    
+    const ABI = [
+      "function approve(address spender, uint256 amount) external returns (bool)",
+      "function allowance(address owner, address spender) view returns (uint256)"
+    ];
+
+    const contract = new ethers.Contract(token, ABI, signer);
+    const owner = await signer.getAddress();
+
+    const current = await contract.allowance(owner, spender);
+    status.innerText = `Allowance atual: ${current.toString()} — enviando revoke...`;
+
+    const tx = await contract.approve(spender, 0);
+    status.innerText = "Transação enviada... aguardando confirmação...";
+
+    await tx.wait();
+
+    status.innerText = "Revogado com sucesso! Hash: " + tx.hash;
+
+  } catch (err) {
+    status.innerText = "Erro: " + err.message;
+    console.error(err);
+  }
+};
+
+🎉 PRONTO!
+
+Agora você tem um dApp completo de REVOKE para Arc Testnet.
+
+O que fazer no Replit:
+
+✔ Criar Repl (HTML/CSS/JS)
+✔ Criar 3 arquivos
+✔ Colar cada código exatamente como enviado
+✔ Clicar Run
+✔ Abrir a URL em outra aba
+✔ Conectar a MetaMask
+✔ Usar o revoke
