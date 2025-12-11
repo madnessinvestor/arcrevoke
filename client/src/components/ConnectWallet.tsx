@@ -5,7 +5,7 @@ import { switchNetwork } from '@/lib/arc-network';
 import { Wallet, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
-export function ConnectWallet() {
+export function ConnectWallet({ onAccountChange }: { onAccountChange?: (account: string | null) => void }) {
   const [account, setAccount] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const { toast } = useToast();
@@ -20,6 +20,7 @@ export function ConnectWallet() {
       const accounts = await provider.listAccounts();
       if (accounts.length > 0) {
         setAccount(accounts[0].address);
+        onAccountChange?.(accounts[0].address);
       }
     }
   };
@@ -39,6 +40,7 @@ export function ConnectWallet() {
       const provider = new BrowserProvider(window.ethereum);
       const accounts = await provider.send("eth_requestAccounts", []);
       setAccount(accounts[0]);
+      onAccountChange?.(accounts[0]);
       
       // Switch to Arc Testnet immediately
       await switchNetwork();

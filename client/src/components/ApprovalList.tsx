@@ -19,7 +19,7 @@ interface Approval {
   approvedAssets: number;
 }
 
-export function ApprovalList() {
+export function ApprovalList({ account }: { account: string | null }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isRevoking, setIsRevoking] = useState(false);
   const { toast } = useToast();
@@ -74,6 +74,20 @@ export function ApprovalList() {
       approvedAssets: 1
     }
   ];
+
+  if (!account) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
+        <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20 animate-pulse">
+           <ShieldAlert size={32} className="text-primary" />
+        </div>
+        <h3 className="text-2xl font-display font-bold text-white">Connect Wallet to View Approvals</h3>
+        <p className="text-muted-foreground max-w-md">
+          Connect your wallet to scan for active token approvals and revoke permissions for the connected account on Arc Testnet.
+        </p>
+      </div>
+    );
+  }
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {

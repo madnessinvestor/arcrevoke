@@ -3,8 +3,11 @@ import { ApprovalList } from "@/components/ApprovalList";
 import { ShieldCheck, Search, Activity, Lock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import generatedImage from '@assets/generated_images/futuristic_abstract_dark_crypto_background_with_neon_networks.png';
+import { useState } from "react";
 
 export default function Home() {
+  const [account, setAccount] = useState<string | null>(null);
+
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
       {/* Background Image Overlay */}
@@ -32,7 +35,7 @@ export default function Home() {
             </div>
           </div>
           
-          <ConnectWallet />
+          <ConnectWallet onAccountChange={setAccount} />
         </div>
       </nav>
 
@@ -79,7 +82,7 @@ export default function Home() {
 
         {/* Approvals List */}
         <div className="glass-panel rounded-xl p-6 md:p-8 min-h-[500px]">
-          <ApprovalList />
+          <ApprovalList account={account} />
         </div>
       </main>
 
