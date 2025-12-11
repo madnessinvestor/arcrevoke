@@ -237,18 +237,26 @@ export function ApprovalList({ account, onStatsUpdate }: { account: string | nul
       setDetectedApprovals(prev => prev.filter(a => a.id !== approval.id));
       
     } catch (err: any) {
-      if (err.code === 4001) {
-        toast({ title: "Rejected", variant: "destructive" });
+      // Handle user rejection or any error - always reset the button state
+      if (err.code === 4001 || err.code === 'ACTION_REJECTED') {
+        toast({ title: "Cancelled", description: "Transaction was cancelled", variant: "destructive" });
       } else {
         toast({ title: "Failed", description: err.message, variant: "destructive" });
       }
-    } finally {
+      // Always remove from revoking state so user can try again
       setRevokingIds(prev => {
         const next = new Set(prev);
         next.delete(approval.id);
         return next;
       });
+      return;
     }
+    // Only remove on success - already handled above
+    setRevokingIds(prev => {
+      const next = new Set(prev);
+      next.delete(approval.id);
+      return next;
+    });
   };
 
   const handleBatchRevokeDetected = async () => {

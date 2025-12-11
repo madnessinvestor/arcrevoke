@@ -100,13 +100,8 @@ export function ConnectWallet({ onAccountChange }: { onAccountChange?: (account:
             setAccount(accounts[0].address);
             onAccountChange?.(accounts[0].address);
             
-            const network = await provider.getNetwork();
-            const currentChainId = "0x" + network.chainId.toString(16);
-            
-            if (currentChainId.toLowerCase() !== ARC_TESTNET.chainId.toLowerCase()) {
-              await switchNetwork();
-              setWrongNetwork(false);
-            }
+            // Always force switch to Arc Testnet when connected
+            await forceNetworkSwitch();
         }
       } catch (e) {
         console.error("Error checking connection", e);
@@ -206,12 +201,10 @@ export function ConnectWallet({ onAccountChange }: { onAccountChange?: (account:
         )}
         {account ? formatAddress(account) : "CONNECT WALLET"}
       </Button>
-      {account && (
-        <div className="flex items-center gap-1 text-[10px] text-primary font-mono">
-          <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shadow-[0_0_5px_#00f3ff]" />
-          Connected to Arc Testnet
-        </div>
-      )}
+      <div className="flex items-center gap-1 text-[10px] text-primary font-mono">
+        <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shadow-[0_0_5px_#00f3ff]" />
+        {account ? "Arc Testnet" : "Arc Testnet Network"}
+      </div>
     </div>
   );
 }
