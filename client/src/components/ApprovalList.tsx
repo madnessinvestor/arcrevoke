@@ -2,10 +2,21 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ShieldAlert, ExternalLink, History, ArrowUpDown, Info, Loader2, RefreshCw } from "lucide-react";
+import { ShieldAlert, ExternalLink, History, ArrowUpDown, Info, Loader2, RefreshCw, Copy, ShieldOff } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { BrowserProvider, Contract } from "ethers";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface Approval {
   id: string;
@@ -30,9 +41,11 @@ interface TokenItem {
 
 export function ApprovalList({ account }: { account: string | null }) {
   const [approvals, setApprovals] = useState<Approval[]>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [isRevoking, setIsRevoking] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedToken, setSelectedToken] = useState<Approval | null>(null);
+  const [spenderAddress, setSpenderAddress] = useState('');
+  const [isRevoking, setIsRevoking] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -46,7 +59,6 @@ export function ApprovalList({ account }: { account: string | null }) {
     setIsLoading(true);
     
     try {
-      // Try to fetch tokens from ArcScan (Blockscout API)
       const response = await fetch(`https://testnet.arcscan.app/api?module=account&action=tokenlist&address=${account}`);
       const data = await response.json();
       
@@ -56,7 +68,7 @@ export function ApprovalList({ account }: { account: string | null }) {
           contractName: token.name,
           contractAddress: token.contractAddress,
           asset: token.symbol,
-          amount: "Unknown", // API doesn't give allowance, user needs to check
+          amount: "Unknown", 
           risk: "Medium",
           trustValue: "$0.00",
           revokeTrends: 0,
@@ -65,46 +77,24 @@ export function ApprovalList({ account }: { account: string | null }) {
         }));
         setApprovals(mappedApprovals);
       } else {
-        // Fallback or empty
         setApprovals([]);
       }
     } catch (error) {
       console.error("Failed to fetch approvals", error);
-      // Fallback to empty state
       setApprovals([]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSelectAll = (checked: boolean) => {
-    if (checked) {
-      setApprovals(prev => {
-        setSelectedIds(prev.map(a => a.id));
-        return prev;
-      });
-    } else {
-      setSelectedIds([]);
-    }
+  const openRevokeDialog = (token: Approval) => {
+      setSelectedToken(token);
+      setSpenderAddress('');
+      setDialogOpen(true);
   };
 
-  const handleSelectOne = (id: string, checked: boolean) => {
-    if (checked) {
-      setSelectedIds(prev => [...prev, id]);
-    } else {
-      setSelectedIds(prev => prev.filter(item => item !== id));
-    }
-  };
-
-  const handleRevoke = async (approvalId?: string) => {
-    if (!window.ethereum) return;
-    
-    // Find the approval(s) to revoke
-    const targets = approvalId 
-      ? approvals.filter(a => a.id === approvalId)
-      : approvals.filter(a => selectedIds.includes(a.id));
-
-    if (targets.length === 0) return;
+  const handleRevoke = async () => {
+    if (!selectedToken || !spenderAddress || !window.ethereum) return;
 
     setIsRevoking(true);
     
@@ -113,68 +103,23 @@ export function ApprovalList({ account }: { account: string | null }) {
       const signer = await provider.getSigner();
       
       const ABI = ["function approve(address spender, uint256 amount) external returns (bool)"];
+      const contract = new Contract(selectedToken.contractAddress, ABI, signer);
 
-      for (const target of targets) {
-        // Since we don't know the SPENDER from the token list API, we can only revoke if we know the spender.
-        // The simple token list API doesn't give us allowances/spenders.
-        // This is a limitation of simple APIs vs Indexers.
-        // However, the user wants "Revoke" to work.
-        // If we don't know the spender, we can't revoke.
-        
-        // WORKAROUND: Ask user for spender or assume a common one? 
-        // No, that's dangerous.
-        // If we can't find spenders, we should direct them to Manual Revoke.
-        
-        // BUT, maybe the user wants to set allowance to 0 for the TOKEN itself (which means clearing *all* spenders? No, approve is per spender).
-        
-        // Let's prompt the user: "Enter spender for [Token]"?
-        // Or, for this prototype, we can assume the user wants to use the Manual Revoke for specific targeting.
-        
-        // Wait, the user text file had "Token" and "Spender".
-        // The list view is "By Contracts".
-        // If I click "Revoke" on "USDC", which spender am I revoking? Uniswap? OpenSea?
-        // Without that info, I can't build the transaction.
-        
-        // I will trigger a toast explaining this limitation and showing the Manual Revoke form pre-filled?
-        // That's a good UX.
-        
-        // For the purpose of the user's request "Revoke button doesn't work", I will make it try to revoke for a *dummy* spender or prompt.
-        // actually, I'll allow them to copy the address to the manual form.
-        
-        // BETTER: When clicking revoke, populate the ManualRevoke form!
-        // I need to lift state up or use a context.
-        // Or simply scroll to the manual form and fill it.
-        
-        // Let's make the list items clickable to "Inspect" which fills the manual form.
-        
-        // But the user expects the button to WORK.
-        // "Não chama o revoke na wallet".
-        // I'll make it call approve(0x0000000000000000000000000000000000000000, 0) ? No, that reverts.
-        
-        // I will assume the user wants to revoke the *Contract Itself* if it's a spender?
-        // "Contract" column usually lists the Token.
-        // Sometimes "Contract" lists the Spender.
-        // If the list is "Active Approvals", the rows should be (Token, Spender).
-        // My API fetch only gets Tokens.
-        
-        // I will change the UI to be honest: "My Tokens".
-        // And the action is "Revoke Spender".
-        // Clicking it should open a dialog to enter the spender?
-        // Or simply copy the token address to the clipboard and tell the user to paste it in the manual form.
-        
-        toast({
-            title: "Spender Required",
-            description: "Please copy the Token Address and use the Manual Revoke tool to specify which Spender to revoke.",
-        });
-        
-        // Copy to clipboard
-        await navigator.clipboard.writeText(target.contractAddress);
-        toast({ title: "Copied", description: "Token address copied to clipboard." });
-      }
+      const tx = await contract.approve(spenderAddress, 0);
+      toast({ title: "Transaction Sent", description: "Waiting for confirmation..." });
+      
+      await tx.wait();
+      
+      toast({ 
+          title: "Revoke Successful", 
+          description: `Successfully revoked permission for ${spenderAddress}`,
+          variant: "default"
+      });
+      setDialogOpen(false);
       
     } catch (err: any) {
       console.error(err);
-      toast({ title: "Error", description: err.message, variant: "destructive" });
+      toast({ title: "Revoke Failed", description: err.message, variant: "destructive" });
     } finally {
       setIsRevoking(false);
     }
@@ -217,15 +162,6 @@ export function ApprovalList({ account }: { account: string | null }) {
                 <RefreshCw size={14} /> Refresh
             </Button>
         </div>
-        
-        {selectedIds.length > 0 && (
-           <Button 
-             disabled
-             className="bg-primary text-black hover:bg-primary/90 font-bold opacity-50 cursor-not-allowed"
-           >
-             Select specific spenders below
-           </Button>
-        )}
       </div>
 
       <div className="rounded-md border border-white/10 bg-card/40 backdrop-blur-sm overflow-hidden">
@@ -255,13 +191,10 @@ export function ApprovalList({ account }: { account: string | null }) {
                 <TableCell>
                     <Button 
                         size="sm" 
-                        onClick={() => {
-                            navigator.clipboard.writeText(approval.contractAddress);
-                            toast({ title: "Copied", description: "Token address copied! Paste it in Manual Revoke." });
-                        }}
-                        className="bg-primary/10 text-primary hover:bg-primary hover:text-black h-8 font-bold border border-primary/20"
+                        onClick={() => openRevokeDialog(approval)}
+                        className="bg-primary text-black hover:bg-primary/90 h-8 font-bold"
                     >
-                        Copy Address
+                        Revoke
                     </Button>
                 </TableCell>
               </TableRow>
@@ -269,6 +202,51 @@ export function ApprovalList({ account }: { account: string | null }) {
           </TableBody>
         </Table>
       </div>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="glass-panel bg-black/90 border-primary/20 text-white">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 font-display">
+                <ShieldOff className="text-primary" /> Revoke Permission
+            </DialogTitle>
+            <DialogDescription>
+              Revoke allowance for <strong>{selectedToken?.asset}</strong> ({selectedToken?.contractName}).
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+                <Label className="text-xs font-mono uppercase text-muted-foreground">Token Address</Label>
+                <Input value={selectedToken?.contractAddress} disabled className="bg-white/5 border-white/10 font-mono text-xs" />
+            </div>
+            
+            <div className="space-y-2">
+                <Label className="text-xs font-mono uppercase text-primary">Spender Address (Required)</Label>
+                <Input 
+                    placeholder="0x... (e.g. Uniswap Router)" 
+                    value={spenderAddress}
+                    onChange={(e) => setSpenderAddress(e.target.value)}
+                    className="bg-black/50 border-primary/30 focus:border-primary font-mono"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                    Enter the address of the contract/wallet you want to revoke permissions for.
+                </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button 
+                onClick={handleRevoke} 
+                disabled={isRevoking || !spenderAddress}
+                className="bg-primary text-black font-bold"
+            >
+                {isRevoking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Confirm Revoke
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

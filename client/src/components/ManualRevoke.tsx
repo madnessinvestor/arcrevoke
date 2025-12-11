@@ -59,7 +59,7 @@ export function ManualRevoke({ account }: { account: string | null }) {
       toast({ title: "Revoked", description: "Successfully revoked permissions." });
       
       // Clear inputs
-      setTokenAddress('');
+      // setTokenAddress(''); // Keep token for convenience
       setSpenderAddress('');
       
     } catch (err: any) {
@@ -110,10 +110,10 @@ export function ManualRevoke({ account }: { account: string | null }) {
             status.type === 'loading' ? 'bg-blue-500/10 border-blue-500/20 text-blue-200' :
             status.type === 'success' ? 'bg-green-500/10 border-green-500/20 text-green-200' :
             'bg-red-500/10 border-red-500/20 text-red-200'
-          } flex items-center gap-2`}>
-            {status.type === 'loading' && <Loader2 className="h-4 w-4 animate-spin" />}
-            {status.type === 'success' && <CheckCircle className="h-4 w-4" />}
-            {status.type === 'error' && <AlertTriangle className="h-4 w-4" />}
+          } flex items-center gap-2 break-all`}>
+            {status.type === 'loading' && <Loader2 className="h-4 w-4 animate-spin shrink-0" />}
+            {status.type === 'success' && <CheckCircle className="h-4 w-4 shrink-0" />}
+            {status.type === 'error' && <AlertTriangle className="h-4 w-4 shrink-0" />}
             <span className="font-mono text-xs">{status.message}</span>
           </div>
         )}

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { BrowserProvider } from 'ethers';
 import { switchNetwork, ARC_TESTNET } from '@/lib/arc-network';
-import { Wallet, Loader2, AlertCircle } from 'lucide-react';
+import { Wallet, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 export function ConnectWallet({ onAccountChange }: { onAccountChange?: (account: string | null) => void }) {
@@ -105,29 +105,40 @@ export function ConnectWallet({ onAccountChange }: { onAccountChange?: (account:
 
   if (account && wrongNetwork) {
       return (
-        <Button 
-          onClick={handleSwitch} 
-          variant="destructive"
-          className="font-bold font-display tracking-wide animate-pulse"
-        >
-          <AlertCircle className="mr-2 h-4 w-4" />
-          SWITCH NETWORK
-        </Button>
+        <div className="flex flex-col items-end gap-1">
+          <Button 
+            onClick={handleSwitch} 
+            variant="destructive"
+            className="font-bold font-display tracking-wide animate-pulse h-9"
+          >
+            <AlertCircle className="mr-2 h-4 w-4" />
+            SWITCH TO ARC
+          </Button>
+          <span className="text-[10px] text-red-500 font-mono">Wrong Network</span>
+        </div>
       );
   }
 
   return (
-    <Button 
-      onClick={connect} 
-      disabled={isConnecting}
-      className="bg-primary hover:bg-primary/90 text-black font-bold font-display tracking-wide glow-effect"
-    >
-      {isConnecting ? (
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-      ) : (
-        <Wallet className="mr-2 h-4 w-4" />
+    <div className="flex flex-col items-end gap-1">
+      <Button 
+        onClick={connect} 
+        disabled={isConnecting}
+        className="bg-primary hover:bg-primary/90 text-black font-bold font-display tracking-wide glow-effect h-9"
+      >
+        {isConnecting ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <Wallet className="mr-2 h-4 w-4" />
+        )}
+        {account ? formatAddress(account) : "CONNECT WALLET"}
+      </Button>
+      {account && (
+        <div className="flex items-center gap-1 text-[10px] text-primary font-mono">
+          <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shadow-[0_0_5px_#00f3ff]" />
+          Connected to Arc Testnet
+        </div>
       )}
-      {account ? formatAddress(account) : "CONNECT WALLET"}
-    </Button>
+    </div>
   );
 }
