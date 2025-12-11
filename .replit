@@ -41,3 +41,4 @@ waitForPort = 5000
 
 [agent]
 mockupState = "FULLSTACK"
+expertMode = true

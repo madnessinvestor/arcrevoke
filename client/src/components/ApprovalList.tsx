@@ -2,17 +2,18 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ShieldAlert, Loader2, RefreshCw, ShieldOff, AlertTriangle, Search } from "lucide-react";
+import { ShieldAlert, Loader2, RefreshCw, ShieldOff, AlertTriangle, Coins, DollarSign } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { BrowserProvider, Contract, JsonRpcProvider } from "ethers";
-import { Input } from "@/components/ui/input";
+import { BrowserProvider, Contract, JsonRpcProvider, formatUnits } from "ethers";
 import { switchNetwork, ARC_TESTNET } from "@/lib/arc-network";
 
 interface Token {
   contractAddress: string;
   name: string;
   symbol: string;
+  balance?: string;
+  decimals?: number;
 }
 
 interface DetectedApproval {
@@ -21,14 +22,36 @@ interface DetectedApproval {
   tokenName: string;
   tokenSymbol: string;
   spenderAddress: string;
+  allowance?: string;
+  valueAtRisk?: number;
 }
 
 const ERC20_ABI = [
   "function approve(address spender, uint256 amount) external returns (bool)",
-  "function allowance(address owner, address spender) view returns (uint256)"
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function balanceOf(address account) view returns (uint256)",
+  "function decimals() view returns (uint8)"
 ];
 
 const APPROVAL_TOPIC = "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925";
+
+// Mock testnet token prices (in USD) - in production this would come from an oracle
+const TESTNET_PRICES: Record<string, number> = {
+  'USDC': 1.00,
+  'USDT': 1.00,
+  'DAI': 1.00,
+  'WETH': 2200,
+  'ETH': 2200,
+  'WBTC': 43000,
+  'BTC': 43000,
+  'ARC': 0.50,
+  'TEST': 0.10,
+};
+
+const getTokenPrice = (symbol: string): number => {
+  const upperSymbol = symbol.toUpperCase();
+  return TESTNET_PRICES[upperSymbol] || 0.01; // Default price for unknown tokens
+};
 
 export function ApprovalList({ account }: { account: string | null }) {
   const [tokens, setTokens] = useState<Token[]>([]);
@@ -37,9 +60,7 @@ export function ApprovalList({ account }: { account: string | null }) {
   const [isScanning, setIsScanning] = useState(false);
   const [revokingIds, setRevokingIds] = useState<Set<string>>(new Set());
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [selectedTokens, setSelectedTokens] = useState<Set<string>>(new Set());
   const [isBatchRevoking, setIsBatchRevoking] = useState(false);
-  const [globalSpender, setGlobalSpender] = useState('');
   const { toast } = useToast();
 
   useEffect(() => {
@@ -62,8 +83,29 @@ export function ApprovalList({ account }: { account: string | null }) {
       const data = await response.json();
       
       if (data.result && Array.isArray(data.result)) {
-        setTokens(data.result);
-        scanForApprovals(data.result);
+        // Fetch balances for each token
+        const provider = new JsonRpcProvider(ARC_TESTNET.rpcUrls[0]);
+        const tokensWithBalances = await Promise.all(
+          data.result.map(async (token: Token) => {
+            try {
+              const contract = new Contract(token.contractAddress, ERC20_ABI, provider);
+              const [balance, decimals] = await Promise.all([
+                contract.balanceOf(account),
+                contract.decimals().catch(() => 18)
+              ]);
+              return {
+                ...token,
+                balance: formatUnits(balance, decimals),
+                decimals
+              };
+            } catch (e) {
+              console.error('Failed to fetch balance for', token.symbol, e);
+              return { ...token, balance: '0', decimals: 18 };
+            }
+          })
+        );
+        setTokens(tokensWithBalances);
+        scanForApprovals(tokensWithBalances);
       } else {
         setTokens([]);
       }
@@ -103,17 +145,28 @@ export function ApprovalList({ account }: { account: string | null }) {
             }
 
             const contract = new Contract(token.contractAddress, ERC20_ABI, provider);
+            const decimals = token.decimals || 18;
             
             for (const spender of Array.from(spendersSet)) {
               try {
                 const allowance = await contract.allowance(account, spender);
                 if (allowance > BigInt(0)) {
+                  // Calculate value at risk
+                  const allowanceFormatted = parseFloat(formatUnits(allowance, decimals));
+                  const tokenPrice = getTokenPrice(token.symbol || '???');
+                  const valueAtRisk = allowanceFormatted * tokenPrice;
+                  
+                  // Cap display at reasonable values for unlimited approvals
+                  const displayValue = valueAtRisk > 1e12 ? Infinity : valueAtRisk;
+                  
                   found.push({
                     id: `${token.contractAddress}-${spender}`,
                     tokenAddress: token.contractAddress,
                     tokenName: token.name || 'Unknown',
                     tokenSymbol: token.symbol || '???',
-                    spenderAddress: spender
+                    spenderAddress: spender,
+                    allowance: formatUnits(allowance, decimals),
+                    valueAtRisk: displayValue
                   });
                 }
               } catch (e) {
@@ -177,45 +230,6 @@ export function ApprovalList({ account }: { account: string | null }) {
     }
   };
 
-  const handleRevokeToken = async (tokenAddress: string) => {
-    if (!globalSpender) {
-      toast({ title: "Enter Spender Address", description: "Enter the spender address above", variant: "destructive" });
-      return;
-    }
-    if (!window.ethereum || !account) {
-      toast({ title: "Wallet Not Connected", variant: "destructive" });
-      return;
-    }
-
-    setRevokingIds(prev => new Set(prev).add(tokenAddress));
-    
-    try {
-      await switchNetwork();
-      const provider = new BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-      const contract = new Contract(tokenAddress, ERC20_ABI, signer);
-      const tx = await contract.approve(globalSpender, 0);
-      
-      toast({ title: "Transaction Sent", description: "Confirm in wallet" });
-      await tx.wait();
-      
-      toast({ title: "Revoked", description: "Permission revoked successfully" });
-      
-    } catch (err: any) {
-      if (err.code === 4001) {
-        toast({ title: "Rejected", variant: "destructive" });
-      } else {
-        toast({ title: "Failed", description: err.message, variant: "destructive" });
-      }
-    } finally {
-      setRevokingIds(prev => {
-        const next = new Set(prev);
-        next.delete(tokenAddress);
-        return next;
-      });
-    }
-  };
-
   const handleBatchRevokeDetected = async () => {
     const toRevoke = detectedApprovals.filter(a => selectedIds.has(a.id));
     if (toRevoke.length === 0) return;
@@ -257,49 +271,34 @@ export function ApprovalList({ account }: { account: string | null }) {
     }
   };
 
-  const handleBatchRevokeTokens = async () => {
-    if (!globalSpender) {
-      toast({ title: "Enter Spender Address", variant: "destructive" });
-      return;
-    }
-    const toRevoke = tokens.filter(t => selectedTokens.has(t.contractAddress));
-    if (toRevoke.length === 0) return;
-    if (!window.ethereum || !account) {
-      toast({ title: "Wallet Not Connected", variant: "destructive" });
-      return;
-    }
-
-    setIsBatchRevoking(true);
-    
-    try {
-      await switchNetwork();
-      const provider = new BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-      
-      let success = 0;
-
-      for (const token of toRevoke) {
-        try {
-          const contract = new Contract(token.contractAddress, ERC20_ABI, signer);
-          const tx = await contract.approve(globalSpender, 0);
-          await tx.wait();
-          success++;
-        } catch (err) {
-          console.error('Batch revoke error:', err);
-        }
-      }
-      
-      toast({ title: "Batch Complete", description: `Revoked ${success}/${toRevoke.length}` });
-      setSelectedTokens(new Set());
-      
-    } catch (err: any) {
-      toast({ title: "Batch Failed", description: err.message, variant: "destructive" });
-    } finally {
-      setIsBatchRevoking(false);
-    }
+  const formatAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+  
+  const formatBalance = (balance: string) => {
+    const num = parseFloat(balance);
+    if (num === 0) return '0';
+    if (num < 0.0001) return '<0.0001';
+    if (num < 1) return num.toFixed(4);
+    if (num < 1000) return num.toFixed(2);
+    if (num < 1000000) return `${(num / 1000).toFixed(2)}K`;
+    return `${(num / 1000000).toFixed(2)}M`;
   };
 
-  const formatAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+  const formatValueAtRisk = (value: number | undefined) => {
+    if (value === undefined) return '-';
+    if (!isFinite(value)) return 'Unlimited';
+    if (value < 0.01) return '<$0.01';
+    if (value < 1000) return `$${value.toFixed(2)}`;
+    if (value < 1000000) return `$${(value / 1000).toFixed(2)}K`;
+    return `$${(value / 1000000).toFixed(2)}M`;
+  };
+
+  const getTotalValueAtRisk = () => {
+    const total = detectedApprovals.reduce((sum, a) => {
+      if (a.valueAtRisk === undefined || !isFinite(a.valueAtRisk)) return sum;
+      return sum + a.valueAtRisk;
+    }, 0);
+    return formatValueAtRisk(total);
+  };
 
   if (isLoading) {
     return (
@@ -326,10 +325,10 @@ export function ApprovalList({ account }: { account: string | null }) {
     <Tabs defaultValue="detected" className="w-full">
       <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
         <TabsList className="bg-black/40">
-          <TabsTrigger value="detected" className="data-[state=active]:bg-primary data-[state=active]:text-black">
-            Detected ({detectedApprovals.length}) {isScanning && <Loader2 className="ml-1 h-3 w-3 animate-spin" />}
+          <TabsTrigger value="detected" className="data-[state=active]:bg-primary data-[state=active]:text-black" data-testid="tab-detected">
+            Detect ({detectedApprovals.length}) {isScanning && <Loader2 className="ml-1 h-3 w-3 animate-spin" />}
           </TabsTrigger>
-          <TabsTrigger value="tokens" className="data-[state=active]:bg-primary data-[state=active]:text-black">
+          <TabsTrigger value="tokens" className="data-[state=active]:bg-primary data-[state=active]:text-black" data-testid="tab-my-tokens">
             My Tokens ({tokens.length})
           </TabsTrigger>
         </TabsList>
@@ -339,16 +338,29 @@ export function ApprovalList({ account }: { account: string | null }) {
       </div>
 
       <TabsContent value="detected" className="space-y-4">
-        {selectedIds.size > 0 && (
-          <Button 
-            onClick={handleBatchRevokeDetected} 
-            disabled={isBatchRevoking}
-            className="bg-primary text-black hover:bg-primary/90 font-bold w-full"
-            data-testid="button-batch-revoke-detected"
-          >
-            {isBatchRevoking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldOff className="mr-2 h-4 w-4" />}
-            Revoke Selected ({selectedIds.size})
-          </Button>
+        {detectedApprovals.length > 0 && (
+          <div className="glass-panel p-4 rounded-lg flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-red-500/20 flex items-center justify-center border border-red-500/30">
+                <DollarSign className="text-red-400 h-5 w-5" />
+              </div>
+              <div>
+                <span className="text-xs font-mono uppercase text-muted-foreground">Total Value at Risk</span>
+                <p className="text-xl font-display font-bold text-red-400" data-testid="text-total-risk">{getTotalValueAtRisk()}</p>
+              </div>
+            </div>
+            {selectedIds.size > 0 && (
+              <Button 
+                onClick={handleBatchRevokeDetected} 
+                disabled={isBatchRevoking}
+                className="bg-primary text-black hover:bg-primary/90 font-bold"
+                data-testid="button-batch-revoke-detected"
+              >
+                {isBatchRevoking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldOff className="mr-2 h-4 w-4" />}
+                Revoke Selected ({selectedIds.size})
+              </Button>
+            )}
+          </div>
         )}
 
         {detectedApprovals.length === 0 ? (
@@ -358,7 +370,7 @@ export function ApprovalList({ account }: { account: string | null }) {
             </div>
             <h3 className="text-xl font-display font-bold text-white">No Active Approvals Detected</h3>
             <p className="text-muted-foreground text-sm max-w-md">
-              {isScanning ? "Scanning blockchain..." : "Use 'My Tokens' tab to revoke manually if needed"}
+              {isScanning ? "Scanning blockchain..." : "Your wallet has no token approvals at risk"}
             </p>
           </div>
         ) : (
@@ -368,7 +380,7 @@ export function ApprovalList({ account }: { account: string | null }) {
                 <TableRow className="border-white/5 hover:bg-transparent">
                   <TableHead className="w-[50px]">
                     <Checkbox 
-                      checked={selectedIds.size === detectedApprovals.length}
+                      checked={selectedIds.size === detectedApprovals.length && detectedApprovals.length > 0}
                       onCheckedChange={() => {
                         if (selectedIds.size === detectedApprovals.length) {
                           setSelectedIds(new Set());
@@ -376,10 +388,12 @@ export function ApprovalList({ account }: { account: string | null }) {
                           setSelectedIds(new Set(detectedApprovals.map(a => a.id)));
                         }
                       }}
+                      data-testid="checkbox-select-all"
                     />
                   </TableHead>
                   <TableHead className="text-muted-foreground font-mono uppercase text-xs">Token</TableHead>
                   <TableHead className="text-muted-foreground font-mono uppercase text-xs">Spender</TableHead>
+                  <TableHead className="text-muted-foreground font-mono uppercase text-xs">Value at Risk</TableHead>
                   <TableHead className="w-[100px]"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -395,6 +409,7 @@ export function ApprovalList({ account }: { account: string | null }) {
                           else next.add(approval.id);
                           setSelectedIds(next);
                         }}
+                        data-testid={`checkbox-approval-${approval.id}`}
                       />
                     </TableCell>
                     <TableCell>
@@ -412,11 +427,17 @@ export function ApprovalList({ account }: { account: string | null }) {
                       <span className="text-sm font-mono text-white">{formatAddress(approval.spenderAddress)}</span>
                     </TableCell>
                     <TableCell>
+                      <span className={`text-sm font-bold ${approval.valueAtRisk && isFinite(approval.valueAtRisk) && approval.valueAtRisk > 100 ? 'text-red-400' : 'text-orange-400'}`} data-testid={`text-risk-${approval.id}`}>
+                        {formatValueAtRisk(approval.valueAtRisk)}
+                      </span>
+                    </TableCell>
+                    <TableCell>
                       <Button 
                         size="sm"
                         onClick={() => handleRevokeDetected(approval)}
                         disabled={revokingIds.has(approval.id)}
                         className="bg-primary text-black hover:bg-primary/90 h-8 font-bold"
+                        data-testid={`button-revoke-${approval.id}`}
                       >
                         {revokingIds.has(approval.id) ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Revoke'}
                       </Button>
@@ -430,30 +451,6 @@ export function ApprovalList({ account }: { account: string | null }) {
       </TabsContent>
 
       <TabsContent value="tokens" className="space-y-4">
-        <div className="glass-panel p-4 rounded-lg space-y-3">
-          <div className="flex items-center gap-2">
-            <Search size={16} className="text-muted-foreground" />
-            <span className="text-xs font-mono uppercase text-primary">Spender Address (for manual revoke)</span>
-          </div>
-          <Input 
-            placeholder="0x..." 
-            value={globalSpender}
-            onChange={(e) => setGlobalSpender(e.target.value)}
-            className="bg-black/50 border-primary/30 focus:border-primary font-mono"
-            data-testid="input-global-spender"
-          />
-          {selectedTokens.size > 0 && globalSpender && (
-            <Button 
-              onClick={handleBatchRevokeTokens} 
-              disabled={isBatchRevoking}
-              className="bg-primary text-black hover:bg-primary/90 font-bold w-full"
-            >
-              {isBatchRevoking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldOff className="mr-2 h-4 w-4" />}
-              Revoke Selected ({selectedTokens.size})
-            </Button>
-          )}
-        </div>
-
         {tokens.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center space-y-4">
             <ShieldAlert size={32} className="text-primary" />
@@ -464,58 +461,30 @@ export function ApprovalList({ account }: { account: string | null }) {
             <Table>
               <TableHeader className="bg-black/40">
                 <TableRow className="border-white/5 hover:bg-transparent">
-                  <TableHead className="w-[50px]">
-                    <Checkbox 
-                      checked={selectedTokens.size === tokens.length}
-                      onCheckedChange={() => {
-                        if (selectedTokens.size === tokens.length) {
-                          setSelectedTokens(new Set());
-                        } else {
-                          setSelectedTokens(new Set(tokens.map(t => t.contractAddress)));
-                        }
-                      }}
-                    />
-                  </TableHead>
                   <TableHead className="text-muted-foreground font-mono uppercase text-xs">Token</TableHead>
                   <TableHead className="text-muted-foreground font-mono uppercase text-xs">Symbol</TableHead>
+                  <TableHead className="text-muted-foreground font-mono uppercase text-xs">Balance</TableHead>
                   <TableHead className="text-muted-foreground font-mono uppercase text-xs">Address</TableHead>
-                  <TableHead className="w-[100px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {tokens.map((token) => (
-                  <TableRow key={token.contractAddress} className="border-white/5 hover:bg-white/5">
-                    <TableCell>
-                      <Checkbox 
-                        checked={selectedTokens.has(token.contractAddress)}
-                        onCheckedChange={() => {
-                          const next = new Set(selectedTokens);
-                          if (next.has(token.contractAddress)) next.delete(token.contractAddress);
-                          else next.add(token.contractAddress);
-                          setSelectedTokens(next);
-                        }}
-                      />
-                    </TableCell>
+                  <TableRow key={token.contractAddress} className="border-white/5 hover:bg-white/5" data-testid={`row-token-${token.contractAddress}`}>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <div className="h-8 w-8 rounded-full bg-white/5 flex items-center justify-center text-primary border border-white/10">
-                          <ShieldAlert size={14} />
+                        <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary border border-primary/20">
+                          <Coins size={14} />
                         </div>
                         <span className="text-sm font-medium text-white">{token.name || "Unknown"}</span>
                       </div>
                     </TableCell>
                     <TableCell className="font-mono text-sm text-white">{token.symbol}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">{formatAddress(token.contractAddress)}</TableCell>
                     <TableCell>
-                      <Button 
-                        size="sm"
-                        onClick={() => handleRevokeToken(token.contractAddress)}
-                        disabled={revokingIds.has(token.contractAddress) || !globalSpender}
-                        className="bg-primary text-black hover:bg-primary/90 h-8 font-bold disabled:opacity-50"
-                      >
-                        {revokingIds.has(token.contractAddress) ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Revoke'}
-                      </Button>
+                      <span className="font-mono text-sm text-primary font-bold" data-testid={`text-balance-${token.contractAddress}`}>
+                        {formatBalance(token.balance || '0')}
+                      </span>
                     </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{formatAddress(token.contractAddress)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
