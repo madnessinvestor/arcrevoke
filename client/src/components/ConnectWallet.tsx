@@ -16,13 +16,20 @@ export function ConnectWallet({ onAccountChange }: { onAccountChange?: (account:
     
     if (window.ethereum) {
       window.ethereum.on('chainChanged', (chainId: string) => {
-        checkNetwork(chainId);
+        // When chain changes, if it's not Arc Testnet, switch back
+        if (chainId.toLowerCase() !== ARC_TESTNET.chainId.toLowerCase()) {
+          setWrongNetwork(true);
+          // Auto-switch back to Arc Testnet
+          forceNetworkSwitch();
+        } else {
+          setWrongNetwork(false);
+        }
       });
       window.ethereum.on('accountsChanged', (accounts: string[]) => {
         if (accounts.length > 0) {
             setAccount(accounts[0]);
             onAccountChange?.(accounts[0]);
-            autoSwitchNetwork();
+            forceNetworkSwitch();
         } else {
             setAccount(null);
             onAccountChange?.(null);
@@ -30,6 +37,30 @@ export function ConnectWallet({ onAccountChange }: { onAccountChange?: (account:
       });
     }
   }, []);
+  
+  const forceNetworkSwitch = async () => {
+    if (!window.ethereum) return;
+    
+    try {
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: ARC_TESTNET.chainId }],
+      });
+      setWrongNetwork(false);
+    } catch (switchError: any) {
+      if (switchError.code === 4902) {
+        try {
+          await window.ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [ARC_TESTNET],
+          });
+          setWrongNetwork(false);
+        } catch (addError) {
+          console.error('Failed to add Arc Testnet', addError);
+        }
+      }
+    }
+  };
 
   const checkNetwork = async (chainId: string) => {
     if (chainId.toLowerCase() !== ARC_TESTNET.chainId.toLowerCase()) {
@@ -100,7 +131,22 @@ export function ConnectWallet({ onAccountChange }: { onAccountChange?: (account:
       setAccount(accounts[0]);
       onAccountChange?.(accounts[0]);
       
-      await switchNetwork();
+      // Force switch to Arc Testnet immediately after connection
+      try {
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: ARC_TESTNET.chainId }],
+        });
+      } catch (switchError: any) {
+        // Chain not added, add it first
+        if (switchError.code === 4902) {
+          await window.ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [ARC_TESTNET],
+          });
+        }
+      }
+      
       setWrongNetwork(false);
       
       toast({

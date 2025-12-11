@@ -177,19 +177,19 @@ export default function Home() {
             <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
               <Search size={64} />
             </div>
-            <div className="flex gap-2 relative z-10">
+            <div className="flex flex-col gap-2 relative z-10">
               <Input 
                 placeholder="Enter contract address (0x...)" 
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyPress={handleKeyPress}
-                className="bg-black/40 border-white/10 focus:border-primary/50 focus:ring-primary/20 font-mono flex-1"
+                className="bg-black/40 border-white/10 focus:border-primary/50 focus:ring-primary/20 font-mono w-full"
                 data-testid="input-search"
               />
               <Button 
                 onClick={searchContract} 
                 disabled={isSearching || !searchQuery.trim()}
-                className="bg-primary text-black font-bold shrink-0"
+                className="bg-primary text-black font-bold w-full"
                 data-testid="button-search"
               >
                 {isSearching ? "..." : "Search"}
