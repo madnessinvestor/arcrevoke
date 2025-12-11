@@ -1,7 +1,8 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ShieldAlert, ExternalLink, CheckCircle2, History } from "lucide-react";
+import { ShieldAlert, ExternalLink, History, ArrowUpDown, Info } from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -12,87 +13,17 @@ interface Approval {
   asset: string;
   amount: string;
   risk: 'High' | 'Medium' | 'Low';
+  trustValue: string;
+  revokeTrends: number;
   lastUpdated: string;
   approvedAssets: number;
 }
 
-export function RevokeCard({ approval }: { approval: Approval }) {
+export function ApprovalList() {
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isRevoking, setIsRevoking] = useState(false);
   const { toast } = useToast();
 
-  const handleRevoke = async () => {
-    setIsRevoking(true);
-    
-    // Simulate transaction delay
-    setTimeout(() => {
-      setIsRevoking(false);
-      toast({
-        title: "Revoke Successful",
-        description: `Successfully revoked approval for ${approval.contractName}`,
-      });
-    }, 2000);
-    
-    // In a real app, we would call:
-    // const contract = new Contract(tokenAddress, ERC20_ABI, signer);
-    // await contract.approve(spenderAddress, 0);
-  };
-
-  return (
-    <div className="group relative overflow-hidden rounded-lg bg-card/40 border border-white/5 hover:border-primary/50 transition-all duration-300 backdrop-blur-sm p-4 hover:shadow-[0_0_20px_rgba(0,243,255,0.1)]">
-      <div className="absolute inset-0 bg-gradient-to-r from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-      
-      <div className="relative flex items-center justify-between gap-4">
-        <div className="flex items-center gap-4 flex-1">
-          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20 text-primary">
-            <ShieldAlert size={20} />
-          </div>
-          
-          <div className="flex flex-col">
-            <div className="flex items-center gap-2">
-              <h3 className="text-white font-medium font-display">{approval.contractName}</h3>
-              <a href={`https://testnet.arcscan.app/address/${approval.contractAddress}`} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-primary transition-colors">
-                <ExternalLink size={14} />
-              </a>
-            </div>
-            <span className="text-xs font-mono text-muted-foreground">{approval.contractAddress}</span>
-          </div>
-        </div>
-
-        <div className="hidden md:flex flex-col items-end gap-1 min-w-[100px]">
-          <span className="text-xs text-muted-foreground uppercase tracking-wider">Risk Level</span>
-          <Badge variant="outline" className={`
-            ${approval.risk === 'High' ? 'border-red-500 text-red-500 bg-red-500/10' : 
-              approval.risk === 'Medium' ? 'border-yellow-500 text-yellow-500 bg-yellow-500/10' : 
-              'border-green-500 text-green-500 bg-green-500/10'}
-          `}>
-            {approval.risk} Risk
-          </Badge>
-        </div>
-
-        <div className="hidden md:flex flex-col items-end gap-1 min-w-[120px]">
-          <span className="text-xs text-muted-foreground uppercase tracking-wider">Approved Amount</span>
-          <span className="text-sm font-mono text-white">{approval.amount} {approval.asset}</span>
-        </div>
-
-        <div className="hidden md:flex flex-col items-end gap-1 min-w-[100px]">
-           <span className="text-xs text-muted-foreground uppercase tracking-wider">Last Updated</span>
-           <span className="text-xs text-muted-foreground">{approval.lastUpdated}</span>
-        </div>
-
-        <Button 
-          onClick={handleRevoke}
-          disabled={isRevoking}
-          variant="outline"
-          className="ml-4 border-primary/50 text-primary hover:bg-primary hover:text-black font-bold tracking-wide min-w-[100px]"
-        >
-          {isRevoking ? "REVOKING..." : "REVOKE"}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-export function ApprovalList() {
   const mockApprovals: Approval[] = [
     {
       id: "1",
@@ -101,6 +32,8 @@ export function ApprovalList() {
       asset: "USDC",
       amount: "Unlimited",
       risk: "High",
+      trustValue: "$0.00",
+      revokeTrends: 6,
       lastUpdated: "25 days ago",
       approvedAssets: 1
     },
@@ -111,6 +44,8 @@ export function ApprovalList() {
       asset: "WETH",
       amount: "Unlimited",
       risk: "Low",
+      trustValue: "$0.00",
+      revokeTrends: 9,
       lastUpdated: "1 year ago",
       approvedAssets: 1
     },
@@ -121,6 +56,8 @@ export function ApprovalList() {
       asset: "USDT",
       amount: "5000.00",
       risk: "Medium",
+      trustValue: "$0.00",
+      revokeTrends: 1,
       lastUpdated: "1 year ago",
       approvedAssets: 1
     },
@@ -131,36 +68,148 @@ export function ApprovalList() {
       asset: "ARC",
       amount: "100.00",
       risk: "Low",
+      trustValue: "$0.00",
+      revokeTrends: 0,
       lastUpdated: "1 month ago",
       approvedAssets: 1
     }
   ];
 
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(mockApprovals.map(a => a.id));
+    } else {
+      setSelectedIds([]);
+    }
+  };
+
+  const handleSelectOne = (id: string, checked: boolean) => {
+    if (checked) {
+      setSelectedIds(prev => [...prev, id]);
+    } else {
+      setSelectedIds(prev => prev.filter(item => item !== id));
+    }
+  };
+
+  const handleRevoke = async (id?: string) => {
+    setIsRevoking(true);
+    const count = id ? 1 : selectedIds.length;
+    
+    setTimeout(() => {
+      setIsRevoking(false);
+      toast({
+        title: "Revoke Successful",
+        description: `Successfully revoked ${count} approval${count > 1 ? 's' : ''}`,
+      });
+      if (id) {
+         // In a real app we'd remove it from the list
+      } else {
+         setSelectedIds([]);
+      }
+    }, 2000);
+  };
+
   return (
     <div className="space-y-4 w-full">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-display font-bold text-white flex items-center gap-2">
-          <History className="text-primary" />
-          Active Approvals
-          <Badge variant="secondary" className="ml-2 bg-primary/20 text-primary hover:bg-primary/30">
-            {mockApprovals.length}
-          </Badge>
-        </h2>
-        
-        <div className="flex gap-2">
-           <Button variant="ghost" className="text-muted-foreground hover:text-primary">
-             Refresh List
-           </Button>
-           <Button variant="destructive" className="bg-destructive/20 text-destructive hover:bg-destructive/30 border border-destructive/50">
-             Revoke All
-           </Button>
+        <div className="flex gap-4">
+            <Button variant="secondary" className="bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20">
+                By Contracts
+            </Button>
+            <Button variant="ghost" className="text-muted-foreground hover:text-primary">
+                By Assets
+            </Button>
         </div>
+        
+        {selectedIds.length > 0 && (
+           <Button 
+             onClick={() => handleRevoke()}
+             disabled={isRevoking}
+             className="bg-primary text-black hover:bg-primary/90 font-bold"
+           >
+             {isRevoking ? "Revoking..." : `Revoke Selected (${selectedIds.length})`}
+           </Button>
+        )}
       </div>
 
-      <div className="grid gap-3">
-        {mockApprovals.map((approval) => (
-          <RevokeCard key={approval.id} approval={approval} />
-        ))}
+      <div className="rounded-md border border-white/10 bg-card/40 backdrop-blur-sm overflow-hidden">
+        <Table>
+          <TableHeader className="bg-black/40">
+            <TableRow className="border-white/5 hover:bg-transparent">
+              <TableHead className="w-[50px]">
+                <Checkbox 
+                  checked={selectedIds.length === mockApprovals.length && mockApprovals.length > 0}
+                  onCheckedChange={(checked) => handleSelectAll(checked as boolean)}
+                  className="border-white/20 data-[state=checked]:bg-primary data-[state=checked]:text-black"
+                />
+              </TableHead>
+              <TableHead className="text-muted-foreground font-mono uppercase text-xs tracking-wider">Contract</TableHead>
+              <TableHead className="text-muted-foreground font-mono uppercase text-xs tracking-wider">
+                  <div className="flex items-center gap-1">
+                      Trust Value <Info size={12} />
+                  </div>
+              </TableHead>
+              <TableHead className="text-muted-foreground font-mono uppercase text-xs tracking-wider">
+                  <div className="flex items-center gap-1">
+                    24h Revoke Trends <ArrowUpDown size={12} />
+                  </div>
+              </TableHead>
+              <TableHead className="text-muted-foreground font-mono uppercase text-xs tracking-wider">
+                  <div className="flex items-center gap-1">
+                    My Approval Time <ArrowUpDown size={12} />
+                  </div>
+              </TableHead>
+              <TableHead className="text-muted-foreground font-mono uppercase text-xs tracking-wider text-right">My Approved Assets</TableHead>
+              <TableHead className="w-[100px]"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {mockApprovals.map((approval) => (
+              <TableRow key={approval.id} className="border-white/5 hover:bg-white/5 transition-colors group">
+                <TableCell>
+                  <Checkbox 
+                    checked={selectedIds.includes(approval.id)}
+                    onCheckedChange={(checked) => handleSelectOne(approval.id, checked as boolean)}
+                    className="border-white/20 data-[state=checked]:bg-primary data-[state=checked]:text-black"
+                  />
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-3">
+                    <div className="h-8 w-8 rounded-full bg-white/5 flex items-center justify-center text-primary border border-white/10">
+                        {approval.risk === 'High' ? <ShieldAlert size={14} className="text-red-500" /> : <ShieldAlert size={14} />}
+                    </div>
+                    <div className="flex flex-col">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-white">{approval.contractName}</span>
+                            <a href="#" className="text-muted-foreground hover:text-primary"><ExternalLink size={12} /></a>
+                        </div>
+                        <span className="text-xs font-mono text-muted-foreground">{approval.contractAddress}</span>
+                    </div>
+                  </div>
+                </TableCell>
+                <TableCell className="font-mono text-sm text-red-400">{approval.trustValue}</TableCell>
+                <TableCell className="font-mono text-sm text-white">{approval.revokeTrends}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">{approval.lastUpdated}</TableCell>
+                <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-2 text-white font-mono">
+                        {approval.approvedAssets} 
+                        <span className="text-muted-foreground text-xs">&gt;</span>
+                    </div>
+                </TableCell>
+                <TableCell>
+                    <Button 
+                        size="sm" 
+                        onClick={() => handleRevoke(approval.id)}
+                        disabled={isRevoking}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity bg-primary/10 text-primary hover:bg-primary hover:text-black h-8 font-bold border border-primary/20"
+                    >
+                        Revoke
+                    </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       </div>
     </div>
   );
