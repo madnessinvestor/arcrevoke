@@ -22,6 +22,7 @@ export function ConnectWallet({ onAccountChange }: { onAccountChange?: (account:
         if (accounts.length > 0) {
             setAccount(accounts[0]);
             onAccountChange?.(accounts[0]);
+            autoSwitchNetwork();
         } else {
             setAccount(null);
             onAccountChange?.(null);
@@ -31,11 +32,31 @@ export function ConnectWallet({ onAccountChange }: { onAccountChange?: (account:
   }, []);
 
   const checkNetwork = async (chainId: string) => {
-    // 0x4CEF22 is 5042002
     if (chainId.toLowerCase() !== ARC_TESTNET.chainId.toLowerCase()) {
         setWrongNetwork(true);
     } else {
         setWrongNetwork(false);
+    }
+  };
+
+  const autoSwitchNetwork = async () => {
+    if (!window.ethereum) return;
+    
+    try {
+      const provider = new BrowserProvider(window.ethereum);
+      const network = await provider.getNetwork();
+      const currentChainId = "0x" + network.chainId.toString(16);
+      
+      if (currentChainId.toLowerCase() !== ARC_TESTNET.chainId.toLowerCase()) {
+        await switchNetwork();
+        setWrongNetwork(false);
+        toast({
+          title: "Network Changed",
+          description: "Automatically switched to Arc Testnet",
+        });
+      }
+    } catch (e) {
+      console.error("Error auto-switching network", e);
     }
   };
 
@@ -49,7 +70,12 @@ export function ConnectWallet({ onAccountChange }: { onAccountChange?: (account:
             onAccountChange?.(accounts[0].address);
             
             const network = await provider.getNetwork();
-            checkNetwork("0x" + network.chainId.toString(16));
+            const currentChainId = "0x" + network.chainId.toString(16);
+            
+            if (currentChainId.toLowerCase() !== ARC_TESTNET.chainId.toLowerCase()) {
+              await switchNetwork();
+              setWrongNetwork(false);
+            }
         }
       } catch (e) {
         console.error("Error checking connection", e);
@@ -74,13 +100,12 @@ export function ConnectWallet({ onAccountChange }: { onAccountChange?: (account:
       setAccount(accounts[0]);
       onAccountChange?.(accounts[0]);
       
-      // Switch to Arc Testnet immediately
       await switchNetwork();
       setWrongNetwork(false);
       
       toast({
         title: "Connected",
-        description: "Wallet connected successfully.",
+        description: "Wallet connected to Arc Testnet.",
       });
     } catch (error) {
       console.error(error);
@@ -110,6 +135,7 @@ export function ConnectWallet({ onAccountChange }: { onAccountChange?: (account:
             onClick={handleSwitch} 
             variant="destructive"
             className="font-bold font-display tracking-wide animate-pulse h-9"
+            data-testid="button-switch-network"
           >
             <AlertCircle className="mr-2 h-4 w-4" />
             SWITCH TO ARC
@@ -125,6 +151,7 @@ export function ConnectWallet({ onAccountChange }: { onAccountChange?: (account:
         onClick={connect} 
         disabled={isConnecting}
         className="bg-primary hover:bg-primary/90 text-black font-bold font-display tracking-wide glow-effect h-9"
+        data-testid="button-connect-wallet"
       >
         {isConnecting ? (
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
