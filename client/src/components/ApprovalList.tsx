@@ -6,17 +6,9 @@ import { ShieldAlert, ExternalLink, History, ArrowUpDown, Info, Loader2, Refresh
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { BrowserProvider, Contract } from "ethers";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { switchNetwork } from "@/lib/arc-network";
 
 interface Approval {
   id: string;
@@ -42,10 +34,9 @@ interface TokenItem {
 export function ApprovalList({ account }: { account: string | null }) {
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedToken, setSelectedToken] = useState<Approval | null>(null);
   const [spenderAddress, setSpenderAddress] = useState('');
   const [isRevoking, setIsRevoking] = useState(false);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedTokens, setSelectedTokens] = useState<Set<string>>(new Set());
   const { toast } = useToast();
 
   useEffect(() => {
@@ -87,41 +78,161 @@ export function ApprovalList({ account }: { account: string | null }) {
     }
   };
 
-  const openRevokeDialog = (token: Approval) => {
-      setSelectedToken(token);
-      setSpenderAddress('');
-      setDialogOpen(true);
-  };
+  const handleRevokeSingle = async (tokenAddress: string) => {
+    if (!spenderAddress) {
+      toast({ 
+        title: "Spender Required", 
+        description: "Please enter a spender address above",
+        variant: "destructive" 
+      });
+      return;
+    }
 
-  const handleRevoke = async () => {
-    if (!selectedToken || !spenderAddress || !window.ethereum) return;
+    if (!window.ethereum || !account) {
+      toast({ 
+        title: "Wallet Not Connected", 
+        description: "Please connect your wallet first",
+        variant: "destructive" 
+      });
+      return;
+    }
 
     setIsRevoking(true);
     
     try {
+      await switchNetwork();
+      
       const provider = new BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
       
       const ABI = ["function approve(address spender, uint256 amount) external returns (bool)"];
-      const contract = new Contract(selectedToken.contractAddress, ABI, signer);
+      const contract = new Contract(tokenAddress, ABI, signer);
 
       const tx = await contract.approve(spenderAddress, 0);
-      toast({ title: "Transaction Sent", description: "Waiting for confirmation..." });
+      toast({ 
+        title: "Transaction Sent", 
+        description: "MetaMask opened - confirm the transaction",
+        variant: "default"
+      });
       
       await tx.wait();
       
       toast({ 
-          title: "Revoke Successful", 
-          description: `Successfully revoked permission for ${spenderAddress}`,
-          variant: "default"
+        title: "Revoke Successful", 
+        description: `Successfully revoked permission for ${spenderAddress}`,
+        variant: "default"
       });
-      setDialogOpen(false);
       
     } catch (err: any) {
       console.error(err);
-      toast({ title: "Revoke Failed", description: err.message, variant: "destructive" });
+      if (err.code === 4001) {
+        toast({ title: "Transaction Rejected", description: "You rejected the transaction", variant: "destructive" });
+      } else {
+        toast({ title: "Revoke Failed", description: err.message, variant: "destructive" });
+      }
     } finally {
       setIsRevoking(false);
+    }
+  };
+
+  const handleRevokeBatch = async () => {
+    if (selectedTokens.size === 0) {
+      toast({ 
+        title: "No Tokens Selected", 
+        description: "Please select at least one token to revoke",
+        variant: "destructive" 
+      });
+      return;
+    }
+
+    if (!spenderAddress) {
+      toast({ 
+        title: "Spender Required", 
+        description: "Please enter a spender address above",
+        variant: "destructive" 
+      });
+      return;
+    }
+
+    if (!window.ethereum || !account) {
+      toast({ 
+        title: "Wallet Not Connected", 
+        description: "Please connect your wallet first",
+        variant: "destructive" 
+      });
+      return;
+    }
+
+    setIsRevoking(true);
+    
+    try {
+      await switchNetwork();
+      
+      const provider = new BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      
+      const ABI = ["function approve(address spender, uint256 amount) external returns (bool)"];
+      
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const tokenAddress of Array.from(selectedTokens)) {
+        try {
+          const contract = new Contract(tokenAddress, ABI, signer);
+          const tx = await contract.approve(spenderAddress, 0);
+          await tx.wait();
+          successCount++;
+        } catch (err) {
+          console.error(`Failed to revoke ${tokenAddress}:`, err);
+          failCount++;
+        }
+      }
+      
+      if (successCount > 0) {
+        toast({ 
+          title: "Batch Revoke Complete", 
+          description: `Successfully revoked ${successCount} token(s)${failCount > 0 ? `, ${failCount} failed` : ''}`,
+          variant: "default"
+        });
+      }
+
+      if (failCount === selectedTokens.size) {
+        toast({ 
+          title: "All Failed", 
+          description: "All revoke transactions failed",
+          variant: "destructive" 
+        });
+      }
+
+      setSelectedTokens(new Set());
+      
+    } catch (err: any) {
+      console.error(err);
+      if (err.code === 4001) {
+        toast({ title: "Transaction Rejected", description: "You rejected the transaction", variant: "destructive" });
+      } else {
+        toast({ title: "Batch Revoke Failed", description: err.message, variant: "destructive" });
+      }
+    } finally {
+      setIsRevoking(false);
+    }
+  };
+
+  const toggleTokenSelection = (tokenAddress: string) => {
+    const newSelected = new Set(selectedTokens);
+    if (newSelected.has(tokenAddress)) {
+      newSelected.delete(tokenAddress);
+    } else {
+      newSelected.add(tokenAddress);
+    }
+    setSelectedTokens(newSelected);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedTokens.size === approvals.length) {
+      setSelectedTokens(new Set());
+    } else {
+      setSelectedTokens(new Set(approvals.map(a => a.contractAddress)));
     }
   };
 
@@ -144,7 +255,7 @@ export function ApprovalList({ account }: { account: string | null }) {
             <p className="text-muted-foreground max-w-md mb-4">
               We couldn't find any tokens with potential approvals in your wallet.
             </p>
-            <Button variant="outline" onClick={fetchApprovals} className="gap-2">
+            <Button variant="outline" onClick={fetchApprovals} className="gap-2" data-testid="button-refresh">
                 <RefreshCw size={14} /> Refresh
             </Button>
         </div>
@@ -153,14 +264,53 @@ export function ApprovalList({ account }: { account: string | null }) {
 
   return (
     <div className="space-y-4 w-full">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex gap-4">
-            <Button variant="secondary" className="bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20">
-                My Tokens ({approvals.length})
+      <div className="flex flex-col gap-4 mb-6">
+        <div className="flex items-center justify-between">
+          <div className="flex gap-4">
+              <Button variant="secondary" className="bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20">
+                  My Tokens ({approvals.length})
+              </Button>
+              <Button variant="ghost" onClick={fetchApprovals} className="text-muted-foreground hover:text-primary gap-2" data-testid="button-refresh-list">
+                  <RefreshCw size={14} /> Refresh
+              </Button>
+          </div>
+        </div>
+
+        <div className="glass-panel p-4 rounded-lg space-y-3">
+          <div className="space-y-2">
+            <Label className="text-xs font-mono uppercase text-primary">Spender Address (Required)</Label>
+            <Input 
+              placeholder="0x... (contract or wallet address)" 
+              value={spenderAddress}
+              onChange={(e) => setSpenderAddress(e.target.value)}
+              className="bg-black/50 border-primary/30 focus:border-primary font-mono"
+              data-testid="input-spender-address"
+            />
+            <p className="text-[10px] text-muted-foreground">
+              Enter the address you want to revoke permissions for
+            </p>
+          </div>
+
+          {selectedTokens.size > 0 && (
+            <Button 
+              onClick={handleRevokeBatch} 
+              disabled={isRevoking || !spenderAddress}
+              className="w-full bg-primary text-black hover:bg-primary/90 font-bold"
+              data-testid="button-revoke-batch"
+            >
+              {isRevoking ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <ShieldOff className="mr-2 h-4 w-4" />
+                  Revoke Selected ({selectedTokens.size})
+                </>
+              )}
             </Button>
-            <Button variant="ghost" onClick={fetchApprovals} className="text-muted-foreground hover:text-primary gap-2">
-                <RefreshCw size={14} /> Refresh
-            </Button>
+          )}
         </div>
       </div>
 
@@ -168,7 +318,13 @@ export function ApprovalList({ account }: { account: string | null }) {
         <Table>
           <TableHeader className="bg-black/40">
             <TableRow className="border-white/5 hover:bg-transparent">
-              <TableHead className="w-[50px]"></TableHead>
+              <TableHead className="w-[50px]">
+                <Checkbox 
+                  checked={selectedTokens.size === approvals.length && approvals.length > 0}
+                  onCheckedChange={toggleSelectAll}
+                  data-testid="checkbox-select-all"
+                />
+              </TableHead>
               <TableHead className="text-muted-foreground font-mono uppercase text-xs tracking-wider">Token</TableHead>
               <TableHead className="text-muted-foreground font-mono uppercase text-xs tracking-wider">Symbol</TableHead>
               <TableHead className="text-muted-foreground font-mono uppercase text-xs tracking-wider">Address</TableHead>
@@ -179,22 +335,35 @@ export function ApprovalList({ account }: { account: string | null }) {
             {approvals.map((approval) => (
               <TableRow key={approval.id} className="border-white/5 hover:bg-white/5 transition-colors group">
                 <TableCell>
-                  <div className="h-8 w-8 rounded-full bg-white/5 flex items-center justify-center text-primary border border-white/10">
-                      <ShieldAlert size={14} />
-                  </div>
+                  <Checkbox 
+                    checked={selectedTokens.has(approval.contractAddress)}
+                    onCheckedChange={() => toggleTokenSelection(approval.contractAddress)}
+                    data-testid={`checkbox-token-${approval.contractAddress}`}
+                  />
                 </TableCell>
                 <TableCell>
+                  <div className="flex items-center gap-2">
+                    <div className="h-8 w-8 rounded-full bg-white/5 flex items-center justify-center text-primary border border-white/10 shrink-0">
+                      <ShieldAlert size={14} />
+                    </div>
                     <span className="text-sm font-medium text-white">{approval.contractName || "Unknown Token"}</span>
+                  </div>
                 </TableCell>
                 <TableCell className="font-mono text-sm text-white">{approval.asset}</TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{approval.contractAddress}</TableCell>
                 <TableCell>
                     <Button 
                         size="sm" 
-                        onClick={() => openRevokeDialog(approval)}
+                        onClick={() => handleRevokeSingle(approval.contractAddress)}
+                        disabled={isRevoking || !spenderAddress}
                         className="bg-primary text-black hover:bg-primary/90 h-8 font-bold"
+                        data-testid={`button-revoke-${approval.contractAddress}`}
                     >
-                        Revoke
+                        {isRevoking ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          'Revoke'
+                        )}
                     </Button>
                 </TableCell>
               </TableRow>
@@ -202,51 +371,6 @@ export function ApprovalList({ account }: { account: string | null }) {
           </TableBody>
         </Table>
       </div>
-
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="glass-panel bg-black/90 border-primary/20 text-white">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 font-display">
-                <ShieldOff className="text-primary" /> Revoke Permission
-            </DialogTitle>
-            <DialogDescription>
-              Revoke allowance for <strong>{selectedToken?.asset}</strong> ({selectedToken?.contractName}).
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-                <Label className="text-xs font-mono uppercase text-muted-foreground">Token Address</Label>
-                <Input value={selectedToken?.contractAddress} disabled className="bg-white/5 border-white/10 font-mono text-xs" />
-            </div>
-            
-            <div className="space-y-2">
-                <Label className="text-xs font-mono uppercase text-primary">Spender Address (Required)</Label>
-                <Input 
-                    placeholder="0x... (e.g. Uniswap Router)" 
-                    value={spenderAddress}
-                    onChange={(e) => setSpenderAddress(e.target.value)}
-                    className="bg-black/50 border-primary/30 focus:border-primary font-mono"
-                />
-                <p className="text-[10px] text-muted-foreground">
-                    Enter the address of the contract/wallet you want to revoke permissions for.
-                </p>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button 
-                onClick={handleRevoke} 
-                disabled={isRevoking || !spenderAddress}
-                className="bg-primary text-black font-bold"
-            >
-                {isRevoking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Confirm Revoke
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
