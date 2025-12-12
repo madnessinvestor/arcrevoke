@@ -26,17 +26,15 @@ Preferred communication style: Simple, everyday language.
 - **Database ORM**: Drizzle ORM with PostgreSQL dialect
 
 ### Key API Endpoints
-- `GET /api/stats` - Retrieve aggregate revoke statistics
+- `GET /api/stats?wallet=<address>` - Retrieve revoke statistics from blockchain for connected wallet
 - `POST /api/revoke` - Record a new token revoke action
 - `GET /api/revokes/recent` - Get recent revoke history
 
 ### Data Storage
-- **Database**: PostgreSQL via Drizzle ORM
+- **Primary**: Blockchain-sourced data via ArcScan API (persists across deployments)
+- **Fallback Database**: PostgreSQL via Drizzle ORM
 - **Schema Location**: `shared/schema.ts`
-- **Tables**:
-  - `users` - Basic user authentication
-  - `revoke_stats` - Aggregate counters for total revokes and value secured
-  - `revoke_history` - Individual revoke records with wallet, token, spender details
+- **Blockchain Service**: `server/blockchain.ts` - Fetches revoke history from ArcScan API
 
 ### Web3 Integration
 - **Library**: ethers.js v6
