@@ -145,29 +145,48 @@ export function ConnectWallet({ onAccountChange, onNetworkChange }: { onAccountC
       setAccount(accounts[0]);
       onAccountChange?.(accounts[0]);
       
-      // Try to switch to Arc Testnet
-      try {
-        await window.ethereum.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: ARC_TESTNET.chainId }],
-        });
-      } catch (switchError: any) {
-        // Chain not added, add it first
-        if (switchError.code === 4902) {
-          try {
-            await window.ethereum.request({
-              method: 'wallet_addEthereumChain',
-              params: [ARC_TESTNET],
+      // First check current network
+      const currentChainId = await getActualChainId();
+      const targetChainId = ARC_TESTNET.chainId.toLowerCase();
+      
+      if (currentChainId !== targetChainId) {
+        // Try to add and switch to Arc Testnet
+        try {
+          // First try to add the chain (in case it doesn't exist)
+          await window.ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [ARC_TESTNET],
+          });
+        } catch (addError: any) {
+          // Chain might already exist, try switching directly
+          console.log('Chain might already exist, trying to switch...');
+        }
+        
+        // Now try to switch to Arc Testnet
+        try {
+          await window.ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: ARC_TESTNET.chainId }],
+          });
+          
+          // Wait a bit for the chain switch to complete
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (switchError: any) {
+          console.error('Switch error:', switchError);
+          // If user rejected, we'll show wrong network state
+          if (switchError.code === 4001) {
+            toast({
+              title: "Network Switch Required",
+              description: "Please approve the network switch to use Arc Testnet.",
+              variant: "destructive",
             });
-          } catch (addError) {
-            console.error('Failed to add chain:', addError);
           }
         }
       }
       
       // Use direct eth_chainId request for fresh chain info after switch attempt
-      const currentChainId = await getActualChainId();
-      const isCorrectNetwork = currentChainId === ARC_TESTNET.chainId.toLowerCase();
+      const finalChainId = await getActualChainId();
+      const isCorrectNetwork = finalChainId === targetChainId;
       setWrongNetwork(!isCorrectNetwork);
       onNetworkChange?.(!isCorrectNetwork);
       
@@ -178,8 +197,8 @@ export function ConnectWallet({ onAccountChange, onNetworkChange }: { onAccountC
         });
       } else {
         toast({
-          title: "Connected",
-          description: "Wallet connected. Please switch to Arc Testnet.",
+          title: "Wrong Network",
+          description: "Please click 'SWITCH TO ARC' to change network.",
           variant: "destructive",
         });
       }
@@ -200,15 +219,57 @@ export function ConnectWallet({ onAccountChange, onNetworkChange }: { onAccountC
   };
   
   const handleSwitch = async () => {
+    const targetChainId = ARC_TESTNET.chainId.toLowerCase();
+    
     try {
-      await switchNetwork();
-      // Use direct eth_chainId request for accurate network verification
+      // First try to add the chain (some wallets require this)
+      try {
+        await window.ethereum.request({
+          method: 'wallet_addEthereumChain',
+          params: [ARC_TESTNET],
+        });
+      } catch (addError: any) {
+        // Chain might already exist, continue to switch
+        console.log('Chain add attempt:', addError.message);
+      }
+      
+      // Now switch to the chain
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: ARC_TESTNET.chainId }],
+      });
+      
+      // Wait for chain switch to complete
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Verify the switch
       const currentChainId = await getActualChainId();
-      const isCorrectNetwork = currentChainId === ARC_TESTNET.chainId.toLowerCase();
+      const isCorrectNetwork = currentChainId === targetChainId;
       setWrongNetwork(!isCorrectNetwork);
       onNetworkChange?.(!isCorrectNetwork);
-    } catch (e) {
+      
+      if (isCorrectNetwork) {
+        toast({
+          title: "Network Changed",
+          description: "Successfully switched to Arc Testnet.",
+        });
+      }
+    } catch (e: any) {
       console.error('Failed to switch network:', e);
+      
+      if (e.code === 4001) {
+        toast({
+          title: "Network Switch Rejected",
+          description: "Please approve the network switch in your wallet.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Network Switch Failed",
+          description: "Failed to switch to Arc Testnet. Please try manually.",
+          variant: "destructive",
+        });
+      }
     }
   };
 
